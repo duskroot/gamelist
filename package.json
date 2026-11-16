@@ -1,0 +1,20 @@
+{
+  "name": "gamelist",
+  "version": "1.0.0",
+  "private": true,
+  "description": "开局 — 桌面派对游戏 H5 客户端（对接 table-server，可迁 Cocos/微信小游戏）",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "smoke": "node scripts/smoke.mjs",
+    "ui:smoke": "node scripts/ui-smoke.mjs"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^24.2.0",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.7"
+  }
+}
