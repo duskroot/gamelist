@@ -1,5 +1,6 @@
+import { cardBackUrl, cardFaceUrl, chipUrl, diceUrl } from "../assets/paths";
 import type { Card, PlayEvent, Snapshot } from "../net/types";
-import { formatCard, suitClass, tenhalfPoints } from "./cards";
+import { tenhalfPoints } from "./cards";
 import { gameName } from "./meta";
 
 function el(html: string): string {
@@ -9,12 +10,17 @@ function el(html: string): string {
 function cardsHtml(cards: Card[] | undefined, faceDown = false): string {
   if (!cards?.length) return `<span class="muted">暂无牌</span>`;
   if (faceDown) {
-    return `<div class="cards">${cards.map(() => `<div class="card back">?</div>`).join("")}</div>`;
+    return `<div class="cards">${cards
+      .map(
+        (_, i) =>
+          `<img class="card-img" style="animation-delay:${i * 45}ms" src="${cardBackUrl()}" alt="牌背" />`,
+      )
+      .join("")}</div>`;
   }
   return `<div class="cards">${cards
     .map(
       (c, i) =>
-        `<div class="card ${suitClass(c.Suit)}" style="animation-delay:${i * 40}ms">${formatCard(c)}</div>`,
+        `<img class="card-img" style="animation-delay:${i * 45}ms" src="${cardFaceUrl(c)}" alt="${c.Suit}-${c.Rank}" />`,
     )
     .join("")}</div>`;
 }
@@ -22,7 +28,10 @@ function cardsHtml(cards: Card[] | undefined, faceDown = false): string {
 function diceHtml(dice: number[] | undefined): string {
   if (!dice?.length) return "";
   return `<div class="cards">${dice
-    .map((d, i) => `<div class="dice" style="animation-delay:${i * 50}ms">${d}</div>`)
+    .map(
+      (d, i) =>
+        `<img class="dice-img" style="animation-delay:${i * 60}ms" src="${diceUrl(d, i % 2 ? "red" : "white")}" alt="骰子${d}" />`,
+    )
     .join("")}</div>`;
 }
 
@@ -43,26 +52,26 @@ export function renderPublic(snapshot: Snapshot, roomMembers?: { Seat: number; N
           .map(
             (r) => `
           <div class="member">
-            <div class="row"><span class="seat">${r.Seat}</span><strong>${memberName(r.Seat, roomMembers)}</strong></div>
-            <div class="row">${diceHtml(r.Dice)}<strong>${r.Sum}</strong></div>
+            <div class="row"><span class="seat">${r.Seat}</span><strong>${escapeHtml(memberName(r.Seat, roomMembers))}</strong></div>
+            <div class="row">${diceHtml(r.Dice)}<strong class="sum-tag">${r.Sum}</strong></div>
           </div>`,
           )
-          .join("") || `<div class="muted">还没有人摇骰子</div>`}</div>
+          .join("") || `<div class="muted center-hint">还没有人摇骰子<br/>点下方按钮开摇</div>`}</div>
       `);
     }
     case "highcard": {
       const drawn = (p.Drawn as { Seat: number; Card: Card }[]) || [];
       return el(`
         <div class="row">${turn ? `<span class="seat-chip turn">轮到 ${memberName(turn, roomMembers)}</span>` : ""}</div>
-        <div class="cards">${drawn
+        <div class="cards center-cards">${drawn
           .map(
             (d, i) => `
-          <div>
-            <div class="muted" style="margin-bottom:4px">${memberName(d.Seat, roomMembers)}</div>
-            <div class="card ${suitClass(d.Card.Suit)}" style="animation-delay:${i * 40}ms">${formatCard(d.Card)}</div>
+          <div class="card-slot">
+            <div class="muted seat-label">${escapeHtml(memberName(d.Seat, roomMembers))}</div>
+            <img class="card-img lg" style="animation-delay:${i * 50}ms" src="${cardFaceUrl(d.Card)}" alt="牌" />
           </div>`,
           )
-          .join("") || `<div class="muted">牌桌空着，等待抽牌</div>`}</div>
+          .join("") || `<div class="muted center-hint">牌桌空着，等待抽牌</div>`}</div>
       `);
     }
     case "tenhalf": {
@@ -77,14 +86,14 @@ export function renderPublic(snapshot: Snapshot, roomMembers?: { Seat: number; N
             (h) => `
           <div class="member ${h.Seat === turn ? "me" : ""}">
             <div>
-              <div class="row"><span class="seat">${h.Seat}</span><strong>${memberName(h.Seat, roomMembers)}</strong>
+              <div class="row"><span class="seat">${h.Seat}</span><strong>${escapeHtml(memberName(h.Seat, roomMembers))}</strong>
                 ${h.Seat === p.Dealer ? `<span class="badge warn">庄</span>` : ""}
                 ${h.Bust ? `<span class="badge">爆</span>` : ""}
                 ${h.Done ? `<span class="badge ok">停</span>` : ""}
               </div>
               ${cardsHtml(h.Cards)}
             </div>
-            <strong>${tenhalfPoints(h.Sum)}</strong>
+            <strong class="sum-tag">${tenhalfPoints(h.Sum)}</strong>
           </div>`,
           )
           .join("")}</div>
@@ -95,7 +104,8 @@ export function renderPublic(snapshot: Snapshot, roomMembers?: { Seat: number; N
       const folded = new Set((p.Folded as number[]) || []);
       const looked = new Set((p.Looked as number[]) || []);
       return el(`
-        <div class="row">
+        <div class="row pot-row">
+          <img class="chip-img" src="${chipUrl("red")}" alt="筹码" />
           <span class="badge warn">底池 ${p.Pot ?? 0}</span>
           <span class="badge">当前注 ${p.Stake ?? 0}</span>
           ${turn ? `<span class="seat-chip turn">轮到 ${memberName(turn, roomMembers)}</span>` : ""}
@@ -106,11 +116,11 @@ export function renderPublic(snapshot: Snapshot, roomMembers?: { Seat: number; N
           <div class="member ${c.Seat === turn ? "me" : ""}">
             <div class="row">
               <span class="seat">${c.Seat}</span>
-              <strong>${memberName(c.Seat, roomMembers)}</strong>
-              ${looked.has(c.Seat) ? `<span class="badge">已看</span>` : ""}
+              <strong>${escapeHtml(memberName(c.Seat, roomMembers))}</strong>
+              ${looked.has(c.Seat) ? `<span class="badge">已看</span>` : `<img class="card-img xs" src="${cardBackUrl()}" alt="暗牌" />`}
               ${folded.has(c.Seat) ? `<span class="badge">弃牌</span>` : ""}
             </div>
-            <strong>${c.Chips}</strong>
+            <div class="row"><img class="chip-img sm" src="${chipUrl("blue")}" alt="" /><strong>${c.Chips}</strong></div>
           </div>`,
           )
           .join("")}</div>
@@ -126,11 +136,11 @@ export function renderPublic(snapshot: Snapshot, roomMembers?: { Seat: number; N
           .map(
             (g) => `
           <div class="member">
-            <div class="row"><span class="seat">${g.Seat}</span><strong>${memberName(g.Seat, roomMembers)}</strong></div>
+            <div class="row"><span class="seat">${g.Seat}</span><strong>${escapeHtml(memberName(g.Seat, roomMembers))}</strong></div>
             <strong>×${g.Multiple}</strong>
           </div>`,
           )
-          .join("") || `<div class="muted">还没有人抢庄</div>`}</div>
+          .join("") || `<div class="muted center-hint">还没有人抢庄</div>`}</div>
       `);
     }
     case "spy": {
@@ -139,8 +149,8 @@ export function renderPublic(snapshot: Snapshot, roomMembers?: { Seat: number; N
       return el(`
         <div class="row">${turn ? `<span class="seat-chip turn">轮到 ${memberName(turn, roomMembers)}</span>` : `<span class="badge">${snapshot.Phase}</span>`}</div>
         <div class="stack">
-          ${speeches.map((s) => `<div class="member"><strong>${memberName(s.Seat, roomMembers)}</strong><span>${escapeHtml(s.Text)}</span></div>`).join("")}
-          ${votes.length ? `<h3>投票</h3>${votes.map((v) => `<div class="muted">${memberName(v.Seat, roomMembers)} → ${memberName(v.TargetSeat, roomMembers)}</div>`).join("")}` : ""}
+          ${speeches.map((s) => `<div class="member"><strong>${escapeHtml(memberName(s.Seat, roomMembers))}</strong><span>${escapeHtml(s.Text)}</span></div>`).join("")}
+          ${votes.length ? `<h3>投票</h3>${votes.map((v) => `<div class="muted">${escapeHtml(memberName(v.Seat, roomMembers))} → ${escapeHtml(memberName(v.TargetSeat, roomMembers))}</div>`).join("")}` : ""}
         </div>
       `);
     }
@@ -152,12 +162,12 @@ export function renderPublic(snapshot: Snapshot, roomMembers?: { Seat: number; N
       return el(`
         <div class="row">
           <span class="badge">${snapshot.Phase}</span>
-          ${turn ? `<span class="seat-chip turn">轮到 ${memberName(turn, roomMembers)}</span>` : `<span class="muted">夜里看 Legal，不看 Turn</span>`}
+          ${turn ? `<span class="seat-chip turn">轮到 ${memberName(turn, roomMembers)}</span>` : `<span class="muted">夜里看 Legal</span>`}
         </div>
         <div class="row">${alive.map((s) => `<span class="seat-chip">${s}</span>`).join("")}</div>
         ${dead.length ? `<div class="muted">出局：${dead.join("、")}</div>` : ""}
         <div class="stack">
-          ${speeches.map((s) => `<div class="member"><strong>${memberName(s.Seat, roomMembers)}</strong><span>${escapeHtml(s.Text)}</span></div>`).join("")}
+          ${speeches.map((s) => `<div class="member"><strong>${escapeHtml(memberName(s.Seat, roomMembers))}</strong><span>${escapeHtml(s.Text)}</span></div>`).join("")}
           ${votes.map((v) => `<div class="muted">${v.Seat} → ${v.TargetSeat}</div>`).join("")}
         </div>
       `);
@@ -195,9 +205,8 @@ export function formatEvent(ev: PlayEvent): string {
     case "Rolled":
       return `#${ev.Seq} ${p.Seat}号摇出 ${(p.Dice as number[])?.join("+")} = ${p.Sum}`;
     case "Drawn":
-      return `#${ev.Seq} ${p.Seat}号抽到 ${formatCard(p.Card as Card)}`;
+      return `#${ev.Seq} ${p.Seat}号抽牌`;
     case "Dealt":
-      return `#${ev.Seq} 发牌完成`;
     case "Deal":
       return `#${ev.Seq} 发牌`;
     case "Bet":
@@ -211,7 +220,7 @@ export function formatEvent(ev: PlayEvent): string {
     case "Start":
       return `#${ev.Seq} 开局 ${gameName(String(p.GameCode || ""))}`;
     default:
-      return `#${ev.Seq} ${ev.Type} ${escapeHtml(JSON.stringify(p))}`;
+      return `#${ev.Seq} ${ev.Type}`;
   }
 }
 

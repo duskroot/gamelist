@@ -1,0 +1,11 @@
+{
+  "__version__": "1.0.10",
+  "modules": {
+    "graphics": true,
+    "gfx-webgl": true,
+    "gfx-webgl2": true,
+    "ui": true,
+    "audio": true,
+    "2d": true
+  }
+}

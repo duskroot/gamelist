@@ -1,6 +1,7 @@
 import type { Api } from "../net/api";
 import { ApiError } from "../net/types";
 import { PULL_INTERVAL_MS } from "../config";
+import { play as playSfx } from "../audio/sfx";
 import {
   appendEvents,
   getState,
@@ -27,6 +28,13 @@ export class PlayLoop {
         if (!snapshot || snapshot.PlayId !== playId) return;
         const pulled = await this.api.pullEvent({ PlayId: playId, Cursor: cursor, Limit: 100 });
         if (pulled.Events.length) {
+          for (const ev of pulled.Events) {
+            if (ev.Type === "Rolled") playSfx("dice");
+            else if (ev.Type === "Bet") playSfx("chip");
+            else if (ev.Type === "Settle") playSfx("win");
+            else if (ev.Type === "Deal" || ev.Type === "Dealt" || ev.Type === "Drawn") playSfx("deal");
+            else playSfx("slide");
+          }
           appendEvents(pulled.Events, pulled.Cursor);
           const fresh = await this.api.describeSnapshot({ PlayId: playId, RoomId: roomId });
           setSnapshot(fresh);

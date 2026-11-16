@@ -28,6 +28,8 @@ import {
   subscribe,
 } from "./state/store";
 import { ROOM_POLL_MS } from "./config";
+import { gameIconUrl, preloadCoreAssets, tableFeltUrl } from "./assets/paths";
+import { isMuted, loadMutePreference, play as playSfx, setMuted, unlockAudio } from "./audio/sfx";
 
 type CreateForm = {
   gameCode: string;
@@ -73,6 +75,9 @@ export function bootApp(root: HTMLElement): void {
   }
 
   async function bootstrap(): Promise<void> {
+    loadMutePreference();
+    patch({ bootMessage: "加载牌面与桌布…" });
+    await preloadCoreAssets();
     patch({ bootMessage: "检查牌桌服务…" });
     try {
       await api.describeHealth();
@@ -81,7 +86,6 @@ export function bootApp(root: HTMLElement): void {
         screen: "login",
         bootMessage: "后端未就绪，仍可尝试登录（请确认 Vite 代理与 table-server）",
       });
-      render();
       return;
     }
 
@@ -104,12 +108,15 @@ export function bootApp(root: HTMLElement): void {
   }
 
   async function doLogin(nickname: string): Promise<void> {
+    unlockAudio();
+    playSfx("click");
     saveNickname(nickname);
     await withBusy(async () => {
       const code = await getLoginCode();
       const result = await api.loginByWechat({ Code: code, Nickname: nickname || undefined });
       saveToken(result.Token);
       applyLogin(result, result.Token);
+      playSfx("chip");
       showToast(`欢迎，${result.Nickname || "玩家"}`, "ok");
       await refreshRooms();
     });
@@ -211,6 +218,7 @@ export function bootApp(root: HTMLElement): void {
         <div class="muted">${st.session?.Nickname || "玩家"} · #${st.session?.UserId ?? "-"}</div>
       </div>
       <div class="row">
+        <button class="btn ghost" data-act="toggleMute">${isMuted() ? "开声音" : "静音"}</button>
         <button class="btn ghost" data-nav="lobby">大厅</button>
         <button class="btn ghost" data-nav="records">战绩</button>
         <button class="btn ghost" data-act="logout">退出</button>
@@ -223,7 +231,8 @@ export function bootApp(root: HTMLElement): void {
     panel.innerHTML = `
       <section class="brand-hero">
         <div class="brand-mark">开局</div>
-        <p class="brand-sub">先玩 H5，再迁 Cocos / 微信小游戏。服务端权威发牌，客户端只渲染快照与事件。</p>
+        <img class="splash-art" src="${tableFeltUrl()}" alt="牌桌" />
+        <p class="brand-sub">绿绒牌桌 · 真牌面骰子贴图 · 对接 table-server。Cocos / 微信工程在 client-cocos。</p>
       </section>
       <section class="panel stack">
         <h2>进入牌桌</h2>
@@ -232,7 +241,7 @@ export function bootApp(root: HTMLElement): void {
           <input id="nick" maxlength="32" placeholder="怎么称呼你" value="${escapeAttr(loadNickname())}" />
         </label>
         <button class="btn" data-act="login">开始玩</button>
-        <p class="muted">H5 用本地固定 Code 模拟微信登录；同一设备会回到同一用户。</p>
+        <p class="muted">素材来自 Kenney Boardgame Pack（CC0）。H5 用本地 Code 模拟微信登录。</p>
       </section>`;
     return panel;
   }
@@ -249,8 +258,11 @@ export function bootApp(root: HTMLElement): void {
           ${GAMES.map(
             (g) => `
             <button class="game-tile ${g.code === createForm.gameCode ? "active" : ""}" data-game="${g.code}">
-              <strong>${g.name}</strong>
-              <span>${g.blurb}<br>${g.min}–${g.max} 人</span>
+              <img src="${gameIconUrl(g.code)}" alt="${g.name}" />
+              <div>
+                <strong>${g.name}</strong>
+                <span>${g.blurb}<br>${g.min}–${g.max} 人</span>
+              </div>
             </button>`,
           ).join("")}
         </div>
@@ -398,7 +410,7 @@ export function bootApp(root: HTMLElement): void {
             ${renderPrivate(snap)}
           </div>
         </div>
-        <div class="action-bar">
+        <div class="action-dock">
           ${
             snap.Settled
               ? `<button class="btn mint" data-act="afterSettle">回到房间再开一局</button>`
@@ -474,6 +486,7 @@ export function bootApp(root: HTMLElement): void {
       }
 
       if (target.dataset.game) {
+        playSfx("click");
         const code = target.dataset.game;
         const meta = gameByCode(code)!;
         createForm = {
@@ -512,10 +525,12 @@ export function bootApp(root: HTMLElement): void {
         return;
       }
       if (target.dataset.submit) {
+        playSfx(target.dataset.submit === "Roll" ? "dice" : "deal");
         void playLoop.submit(target.dataset.submit);
         return;
       }
       if (target.dataset.compose) {
+        playSfx("click");
         openActionComposer(target.dataset.compose);
         return;
       }
@@ -536,6 +551,11 @@ export function bootApp(root: HTMLElement): void {
           void doLogin(nick);
           break;
         }
+        case "toggleMute":
+          setMuted(!isMuted());
+          playSfx("click");
+          render();
+          break;
         case "logout":
           playLoop.stop();
           stopRoomPoll();
@@ -544,6 +564,7 @@ export function bootApp(root: HTMLElement): void {
           showToast("已退出", "info");
           break;
         case "create":
+          playSfx("chip");
           void withBusy(async () => {
             let config: Record<string, unknown> = {};
             try {
@@ -612,6 +633,7 @@ export function bootApp(root: HTMLElement): void {
           });
           break;
         case "start":
+          playSfx("deal");
           void withBusy(async () => {
             const room = getState().room!;
             const snap = await api.startPlay({ RoomId: room.RoomId });
