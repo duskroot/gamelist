@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"sort"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -252,15 +253,11 @@ func (s *Service) Open(ctx context.Context, userID, roundID string) (OpenResult,
 	if !hasPrev || seq < 1 {
 		return OpenResult{}, ErrIllegal
 	}
-	seats, err := loadSeats(ctx, tx, roomID)
-	if err != nil {
-		return OpenResult{}, err
-	}
 	hands, err := loadHands(ctx, tx, roundID)
 	if err != nil {
 		return OpenResult{}, err
 	}
-	ordered, _ := orderedHands(seats, hands)
+	ordered := everyHand(hands)
 	winnerSeat := seatNo
 	if CountFace(ordered, face) >= count {
 		winnerSeat = bidSeat
@@ -274,7 +271,7 @@ func (s *Service) Open(ctx context.Context, userID, roundID string) (OpenResult,
 	return OpenResult{
 		RoomID:     roomID,
 		RoundID:    roundID,
-		Hands:      handViews(seats, hands),
+		Hands:      handViews(handSeats(hands), hands),
 		Outcome:    "Win",
 		WinnerSeat: winnerSeat,
 	}, nil
@@ -389,6 +386,20 @@ func latestBid(ctx context.Context, q querier, roundID string) (seat, count, fac
 		return 0, 0, 0, 0, false, err
 	}
 	return seat, count, face, seq, true, nil
+}
+
+func everyHand(hands map[int][5]int) [][5]int {
+	ordered, _ := orderedHands(handSeats(hands), hands)
+	return ordered
+}
+
+func handSeats(hands map[int][5]int) []int {
+	seats := make([]int, 0, len(hands))
+	for seat := range hands {
+		seats = append(seats, seat)
+	}
+	sort.Ints(seats)
+	return seats
 }
 
 func orderedHands(seats []int, hands map[int][5]int) ([][5]int, bool) {

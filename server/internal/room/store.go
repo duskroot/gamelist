@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 
+	"den/internal/dice"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -14,13 +16,14 @@ import (
 )
 
 var (
-	ErrNotFound = errors.New("room not found")
-	ErrFull     = errors.New("room full")
-	ErrNotIn    = errors.New("not in room")
-	ErrNotHost  = errors.New("not host")
-	ErrNotReady = errors.New("not ready")
-	ErrIllegal  = errors.New("illegal action")
-	ErrBadInput = errors.New("bad input")
+	ErrNotFound  = errors.New("room not found")
+	ErrFull      = errors.New("room full")
+	ErrNotIn     = errors.New("not in room")
+	ErrNotHost   = errors.New("not host")
+	ErrNotReady  = errors.New("not ready")
+	ErrIllegal   = errors.New("illegal action")
+	ErrBadInput  = errors.New("bad input")
+	errLockRetry = errors.New("retry leave lock")
 )
 
 type SeatView struct {
@@ -172,11 +175,27 @@ func (s *Store) Leave(ctx context.Context, userID, roomID string) error {
 	if userID == "" || roomID == "" {
 		return ErrBadInput
 	}
+	var last error
+	for attempt := 0; attempt < 8; attempt++ {
+		err := s.leaveOnce(ctx, userID, roomID)
+		if !errors.Is(err, errLockRetry) {
+			return err
+		}
+		last = err
+	}
+	return last
+}
+
+func (s *Store) leaveOnce(ctx context.Context, userID, roomID string) error {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
+	roundID, mode, status, turnSeat, hasRound, err := lockOpenRound(ctx, tx, roomID)
+	if err != nil {
+		return err
+	}
 	var host string
 	err = tx.QueryRow(ctx, `SELECT host_user_id FROM rooms WHERE room_id=$1 FOR UPDATE`, roomID).Scan(&host)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -184,6 +203,13 @@ func (s *Store) Leave(ctx context.Context, userID, roomID string) error {
 	}
 	if err != nil {
 		return err
+	}
+	currentID, stillOpen, err := openRoundID(ctx, tx, roomID)
+	if err != nil {
+		return err
+	}
+	if hasRound != stillOpen || (hasRound && currentID != roundID) {
+		return errLockRetry
 	}
 	tag, err := tx.Exec(ctx, `DELETE FROM room_seats WHERE room_id=$1 AND user_id=$2`, roomID, userID)
 	if err != nil {
@@ -195,6 +221,11 @@ func (s *Store) Leave(ctx context.Context, userID, roomID string) error {
 	var remaining int
 	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM room_seats WHERE room_id=$1`, roomID).Scan(&remaining); err != nil {
 		return err
+	}
+	if hasRound {
+		if err := repairRound(ctx, tx, roomID, roundID, mode, status, turnSeat, remaining); err != nil {
+			return err
+		}
 	}
 	if remaining == 0 {
 		if _, err := tx.Exec(ctx, `UPDATE rooms SET status='Closed' WHERE room_id=$1`, roomID); err != nil {
@@ -210,6 +241,142 @@ func (s *Store) Leave(ctx context.Context, userID, roomID string) error {
 		}
 	}
 	return tx.Commit(ctx)
+}
+
+func lockOpenRound(ctx context.Context, tx pgx.Tx, roomID string) (roundID, mode, status string, turnSeat int, ok bool, err error) {
+	err = tx.QueryRow(ctx, `SELECT round_id, mode, status, turn_seat FROM dice_rounds WHERE room_id=$1 AND status IN ('Rolling','Calling') ORDER BY created_at DESC, round_id DESC LIMIT 1 FOR UPDATE`, roomID).Scan(&roundID, &mode, &status, &turnSeat)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", "", "", 0, false, nil
+	}
+	if err != nil {
+		return "", "", "", 0, false, err
+	}
+	return roundID, mode, status, turnSeat, true, nil
+}
+
+func openRoundID(ctx context.Context, tx pgx.Tx, roomID string) (string, bool, error) {
+	var roundID string
+	err := tx.QueryRow(ctx, `SELECT round_id FROM dice_rounds WHERE room_id=$1 AND status IN ('Rolling','Calling') ORDER BY created_at DESC, round_id DESC LIMIT 1`, roomID).Scan(&roundID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return roundID, true, nil
+}
+
+func repairRound(ctx context.Context, tx pgx.Tx, roomID, roundID, mode, status string, turnSeat, remaining int) error {
+	if remaining == 0 {
+		_, err := tx.Exec(ctx, `UPDATE dice_rounds SET status='Resolved', outcome='Draw', winner_seat=-1 WHERE round_id=$1`, roundID)
+		return err
+	}
+	if remaining == 1 {
+		var seat int
+		if err := tx.QueryRow(ctx, `SELECT seat_no FROM room_seats WHERE room_id=$1`, roomID).Scan(&seat); err != nil {
+			return err
+		}
+		return finishRound(ctx, tx, roundID, roomID, "Win", seat)
+	}
+	seats, err := seatNos(ctx, tx, roomID)
+	if err != nil {
+		return err
+	}
+	if status == "Rolling" {
+		hands, err := handsBySeat(ctx, tx, roundID)
+		if err != nil {
+			return err
+		}
+		ordered := make([][5]int, 0, len(seats))
+		for _, seat := range seats {
+			hand, ok := hands[seat]
+			if !ok {
+				return nil
+			}
+			ordered = append(ordered, hand)
+		}
+		if mode == "LiarsDice" {
+			_, err = tx.Exec(ctx, `UPDATE dice_rounds SET status='Calling', turn_seat=$2 WHERE round_id=$1`, roundID, seats[0])
+			return err
+		}
+		winner, draw := dice.CompareHighRoll(ordered)
+		outcome := "Win"
+		winnerSeat := -1
+		if draw {
+			outcome = "Draw"
+		} else if winner >= 0 && winner < len(seats) {
+			winnerSeat = seats[winner]
+		}
+		return finishRound(ctx, tx, roundID, roomID, outcome, winnerSeat)
+	}
+	if status == "Calling" {
+		for _, seat := range seats {
+			if seat == turnSeat {
+				return nil
+			}
+		}
+		_, err = tx.Exec(ctx, `UPDATE dice_rounds SET turn_seat=$2 WHERE round_id=$1`, roundID, nextSeat(seats, turnSeat))
+		return err
+	}
+	return nil
+}
+
+func finishRound(ctx context.Context, tx pgx.Tx, roundID, roomID, outcome string, winnerSeat int) error {
+	if _, err := tx.Exec(ctx, `UPDATE dice_rounds SET status='Resolved', outcome=$2, winner_seat=$3 WHERE round_id=$1`, roundID, outcome, winnerSeat); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE rooms SET status='Open' WHERE room_id=$1`, roomID); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `UPDATE room_seats SET ready=false WHERE room_id=$1`, roomID)
+	return err
+}
+
+func seatNos(ctx context.Context, tx pgx.Tx, roomID string) ([]int, error) {
+	rows, err := tx.Query(ctx, `SELECT seat_no FROM room_seats WHERE room_id=$1 ORDER BY seat_no`, roomID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	seats := []int{}
+	for rows.Next() {
+		var seat int
+		if err := rows.Scan(&seat); err != nil {
+			return nil, err
+		}
+		seats = append(seats, seat)
+	}
+	return seats, rows.Err()
+}
+
+func handsBySeat(ctx context.Context, tx pgx.Tx, roundID string) (map[int][5]int, error) {
+	rows, err := tx.Query(ctx, `SELECT seat_no, die_1, die_2, die_3, die_4, die_5 FROM dice_hands WHERE round_id=$1 ORDER BY seat_no`, roundID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	hands := map[int][5]int{}
+	for rows.Next() {
+		var seat int
+		var hand [5]int
+		if err := rows.Scan(&seat, &hand[0], &hand[1], &hand[2], &hand[3], &hand[4]); err != nil {
+			return nil, err
+		}
+		hands[seat] = hand
+	}
+	return hands, rows.Err()
+}
+
+func nextSeat(seats []int, current int) int {
+	for _, seat := range seats {
+		if seat > current {
+			return seat
+		}
+	}
+	if len(seats) == 0 {
+		return current
+	}
+	return seats[0]
 }
 
 func (s *Store) Ready(ctx context.Context, userID, roomID string, ready bool) error {
