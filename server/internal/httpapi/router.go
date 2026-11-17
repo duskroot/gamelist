@@ -5,6 +5,7 @@ import (
 	"den/internal/dice"
 	"den/internal/envelope"
 	"den/internal/hall"
+	"den/internal/match"
 	"den/internal/realtime"
 	"den/internal/room"
 
@@ -35,7 +36,8 @@ func New(deps Deps) *server.Hertz {
 	h.POST("/den/v1/account/UpdateNickname", Authenticate(deps.Redis, "account", "UpdateNickname"), acc.UpdateNickname)
 	hallHandler := &hall.Handler{Pool: deps.Pool, Redis: deps.Redis}
 	h.POST("/den/v1/hall/EnterHall", Authenticate(deps.Redis, "hall", "EnterHall"), hallHandler.EnterHall)
-	rooms := &room.Handler{Store: &room.Store{Pool: deps.Pool}, Publisher: deps.Publisher}
+	roomStore := &room.Store{Pool: deps.Pool}
+	rooms := &room.Handler{Store: roomStore, Publisher: deps.Publisher}
 	h.POST("/den/v1/room/CreateRoom", Authenticate(deps.Redis, "room", "CreateRoom"), rooms.CreateRoom)
 	h.POST("/den/v1/room/JoinRoom", Authenticate(deps.Redis, "room", "JoinRoom"), rooms.JoinRoom)
 	h.POST("/den/v1/room/LeaveRoom", Authenticate(deps.Redis, "room", "LeaveRoom"), rooms.LeaveRoom)
@@ -50,5 +52,9 @@ func New(deps Deps) *server.Hertz {
 	h.POST("/den/v1/dice/Call", Authenticate(deps.Redis, "dice", "Call"), diceHandler.Call)
 	h.POST("/den/v1/dice/Open", Authenticate(deps.Redis, "dice", "Open"), diceHandler.Open)
 	h.POST("/den/v1/dice/DescribeRound", Authenticate(deps.Redis, "dice", "DescribeRound"), diceHandler.DescribeRound)
+	matches := &match.Handler{Service: &match.Service{Pool: deps.Pool, Redis: deps.Redis, Rooms: roomStore}}
+	h.POST("/den/v1/match/StartMatch", Authenticate(deps.Redis, "match", "StartMatch"), matches.StartMatch)
+	h.POST("/den/v1/match/DescribeMatch", Authenticate(deps.Redis, "match", "DescribeMatch"), matches.DescribeMatch)
+	h.POST("/den/v1/match/CancelMatch", Authenticate(deps.Redis, "match", "CancelMatch"), matches.CancelMatch)
 	return h
 }
