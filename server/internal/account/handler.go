@@ -83,6 +83,47 @@ func (h *Handler) GuestLogin(ctx context.Context, c *app.RequestContext) {
 	envelope.OK(c, "account", "GuestLogin", map[string]string{"UserId": userID, "Token": token, "Nickname": nickname})
 }
 
+type nicknameReq struct {
+	Nickname string `json:"Nickname"`
+}
+
+func (h *Handler) UpdateNickname(ctx context.Context, c *app.RequestContext) {
+	userID, ok := userID(c)
+	if !ok {
+		envelope.Fail(c, 200, "account", "UpdateNickname", "100003", "Unauthorized", "")
+		return
+	}
+	var req nicknameReq
+	raw, err := c.Body()
+	if err != nil {
+		envelope.Fail(c, 200, "account", "UpdateNickname", "100002", "Invalid Parameter", "body must be JSON")
+		return
+	}
+	if err := json.Unmarshal(raw, &req); err != nil {
+		envelope.Fail(c, 200, "account", "UpdateNickname", "100002", "Invalid Parameter", "body must be JSON")
+		return
+	}
+	if utf8.RuneCountInString(req.Nickname) < 2 || utf8.RuneCountInString(req.Nickname) > 12 {
+		envelope.Fail(c, 200, "account", "UpdateNickname", "100002", "Invalid Parameter", "Nickname length must be 2 to 12")
+		return
+	}
+	tag, err := h.Pool.Exec(ctx, `UPDATE users SET nickname=$1 WHERE user_id=$2`, req.Nickname, userID)
+	if err != nil || tag.RowsAffected() != 1 {
+		envelope.Fail(c, 200, "account", "UpdateNickname", "100001", "System Error", "")
+		return
+	}
+	envelope.OK(c, "account", "UpdateNickname", map[string]string{"Nickname": req.Nickname})
+}
+
+func userID(c *app.RequestContext) (string, bool) {
+	v, ok := c.Get("UserID")
+	if !ok {
+		return "", false
+	}
+	id, ok := v.(string)
+	return id, ok && id != ""
+}
+
 func defaultNickname() string {
 	var n [2]byte
 	_, _ = rand.Read(n[:])
