@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"den/internal/account"
+	"den/internal/dice"
 	"den/internal/envelope"
 	"den/internal/hall"
 	"den/internal/realtime"
@@ -16,11 +17,16 @@ type Deps struct {
 	Pool      *pgxpool.Pool
 	Redis     *redis.Client
 	Publisher realtime.Publisher
+	Roller    dice.Roller
 }
 
 func New(deps Deps) *server.Hertz {
 	if deps.Publisher == nil {
 		deps.Publisher = realtime.Nop{}
+	}
+	roller := deps.Roller
+	if roller == nil {
+		roller = dice.CryptoRoller
 	}
 	h := server.New()
 	h.Use(envelope.Recovery())
@@ -36,5 +42,13 @@ func New(deps Deps) *server.Hertz {
 	h.POST("/den/v1/room/Ready", Authenticate(deps.Redis, "room", "Ready"), rooms.Ready)
 	h.POST("/den/v1/room/DescribeRoom", Authenticate(deps.Redis, "room", "DescribeRoom"), rooms.DescribeRoom)
 	h.POST("/den/v1/room/StartGame", Authenticate(deps.Redis, "room", "StartGame"), rooms.StartGame)
+	diceHandler := &dice.Handler{
+		Service:   &dice.Service{Pool: deps.Pool, Roller: roller},
+		Publisher: deps.Publisher,
+	}
+	h.POST("/den/v1/dice/Roll", Authenticate(deps.Redis, "dice", "Roll"), diceHandler.Roll)
+	h.POST("/den/v1/dice/Call", Authenticate(deps.Redis, "dice", "Call"), diceHandler.Call)
+	h.POST("/den/v1/dice/Open", Authenticate(deps.Redis, "dice", "Open"), diceHandler.Open)
+	h.POST("/den/v1/dice/DescribeRound", Authenticate(deps.Redis, "dice", "DescribeRound"), diceHandler.DescribeRound)
 	return h
 }
