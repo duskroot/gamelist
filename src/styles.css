@@ -47,7 +47,6 @@ body {
   display: grid;
   gap: 10px;
   padding: 36px 8px 18px;
-  animation: rise 0.7s ease both;
 }
 
 .brand-mark {
@@ -72,7 +71,6 @@ body {
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 14px;
-  animation: rise 0.45s ease both;
 }
 
 .topbar .brand-mini {
@@ -92,7 +90,6 @@ body {
   box-shadow: var(--shadow);
   padding: 16px;
   backdrop-filter: blur(8px);
-  animation: rise 0.55s ease both;
 }
 
 .panel + .panel {

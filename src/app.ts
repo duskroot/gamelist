@@ -141,6 +141,7 @@ export function bootApp(root: HTMLElement): void {
       startRoomPoll(room.RoomId);
       if (room.Status === "playing" && room.PlayId) {
         const snap = await api.describeSnapshot({ RoomId: room.RoomId, PlayId: room.PlayId });
+        stopRoomPoll();
         beginPlay(snap);
         playLoop.start(snap.PlayId, room.RoomId);
       }
@@ -157,11 +158,11 @@ export function bootApp(root: HTMLElement): void {
           const st = getState();
           if (room.Status === "playing" && room.PlayId && st.screen === "room") {
             const snap = await api.describeSnapshot({ RoomId: room.RoomId, PlayId: room.PlayId });
+            stopRoomPoll();
             beginPlay(snap);
             playLoop.start(snap.PlayId, room.RoomId);
           }
           if (room.Status === "open" && st.screen === "play" && st.snapshot?.Settled) {
-            // after settle, room returns to open
             playLoop.stop();
           }
         } catch {
@@ -645,6 +646,7 @@ export function bootApp(root: HTMLElement): void {
             const snap = await api.startPlay({ RoomId: room.RoomId });
             const freshRoom = await api.describeRoom({ RoomId: room.RoomId });
             setRoom(freshRoom);
+            stopRoomPoll();
             beginPlay(snap);
             playLoop.start(snap.PlayId, room.RoomId);
             showToast("对局开始", "ok");
@@ -654,6 +656,7 @@ export function bootApp(root: HTMLElement): void {
           void withBusy(async () => {
             const room = getState().room!;
             const snap = await api.describeSnapshot({ RoomId: room.RoomId, PlayId: room.PlayId });
+            stopRoomPoll();
             beginPlay(snap);
             playLoop.start(snap.PlayId, room.RoomId);
           });
@@ -833,8 +836,30 @@ export function bootApp(root: HTMLElement): void {
     });
   }
 
+  function updateChromeOnly(): void {
+    const st = getState();
+    const busy = root.querySelector(".busy-overlay");
+    if (busy) busy.classList.toggle("on", st.busy);
+    let toast = root.querySelector(".toast");
+    if (st.toast) {
+      if (!toast) {
+        toast = document.createElement("div");
+        root.append(toast);
+      }
+      toast.className = `toast ${st.toast.tone}`;
+      toast.textContent = st.toast.text;
+    } else if (toast) {
+      toast.remove();
+    }
+  }
+
   bindEvents();
-  subscribe(() => {
+  subscribe((changed) => {
+    const soft = new Set(["busy", "toast", "cursor", "clientSeq", "lastError"]);
+    if (changed.length > 0 && changed.every((key) => soft.has(key))) {
+      updateChromeOnly();
+      return;
+    }
     render();
   });
 

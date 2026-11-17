@@ -20,7 +20,7 @@ export type AppState = {
   lastError: string;
 };
 
-type Listener = () => void;
+type Listener = (changed: (keyof AppState)[]) => void;
 
 const state: AppState = {
   screen: "boot",
@@ -51,13 +51,30 @@ export function subscribe(listener: Listener): () => void {
   return () => listeners.delete(listener);
 }
 
-function emit(): void {
-  for (const listener of listeners) listener();
+function emit(changed: (keyof AppState)[]): void {
+  if (!changed.length) return;
+  for (const listener of listeners) listener(changed);
+}
+
+function sameValue(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+  if (typeof a !== "object" || typeof b !== "object" || !a || !b) return false;
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return false;
+  }
 }
 
 export function patch(partial: Partial<AppState>): void {
-  Object.assign(state, partial);
-  emit();
+  const changed: (keyof AppState)[] = [];
+  for (const key of Object.keys(partial) as (keyof AppState)[]) {
+    const next = partial[key];
+    if (sameValue(state[key], next)) continue;
+    (state as Record<string, unknown>)[key] = next as unknown;
+    changed.push(key);
+  }
+  emit(changed);
 }
 
 export function setScreen(screen: Screen): void {
@@ -118,7 +135,7 @@ export function setSnapshot(snapshot: Snapshot): void {
 
 export function appendEvents(events: PlayEvent[], cursor: number): void {
   if (!events.length) {
-    patch({ cursor });
+    if (cursor !== state.cursor) patch({ cursor });
     return;
   }
   patch({

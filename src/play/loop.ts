@@ -15,11 +15,13 @@ export class PlayLoop {
   private timer = 0;
   private pulling = false;
   private roomTimer = 0;
+  private quietTicks = 0;
 
   constructor(private api: Api) {}
 
   start(playId: string, roomId: string): void {
     this.stop();
+    this.quietTicks = 0;
     const tick = async () => {
       if (this.pulling) return;
       this.pulling = true;
@@ -28,6 +30,7 @@ export class PlayLoop {
         if (!snapshot || snapshot.PlayId !== playId) return;
         const pulled = await this.api.pullEvent({ PlayId: playId, Cursor: cursor, Limit: 100 });
         if (pulled.Events.length) {
+          this.quietTicks = 0;
           for (const ev of pulled.Events) {
             if (ev.Type === "Rolled") playSfx("dice");
             else if (ev.Type === "Bet") playSfx("chip");
@@ -40,13 +43,15 @@ export class PlayLoop {
           setSnapshot(fresh);
         } else {
           appendEvents([], pulled.Cursor);
-          // refresh deadline / legal even when quiet
-          const fresh = await this.api.describeSnapshot({ PlayId: playId, RoomId: roomId });
-          setSnapshot(fresh);
+          // 无新事件时不要每秒整页重绘；每 5 秒轻量对齐一次 Deadline/Legal
+          this.quietTicks += 1;
+          if (this.quietTicks % 5 === 0) {
+            const fresh = await this.api.describeSnapshot({ PlayId: playId, RoomId: roomId });
+            setSnapshot(fresh);
+          }
         }
       } catch (err) {
         if (err instanceof ApiError && err.code === "200001") return;
-        // keep looping; surface soft error
         console.warn("pull failed", err);
       } finally {
         this.pulling = false;
@@ -57,7 +62,7 @@ export class PlayLoop {
 
     this.roomTimer = window.setInterval(() => {
       void this.refreshRoom(roomId);
-    }, 2000);
+    }, 4000);
   }
 
   stop(): void {
