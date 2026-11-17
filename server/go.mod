@@ -5,6 +5,8 @@ go 1.26.9
 require (
 	github.com/cloudwego/hertz v0.10.6
 	github.com/google/uuid v1.6.0
+	github.com/gorilla/websocket v1.5.3
+	github.com/hertz-contrib/websocket v0.2.0
 	github.com/jackc/pgx/v5 v5.13.0
 	github.com/redis/go-redis/v9 v9.23.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.45.0

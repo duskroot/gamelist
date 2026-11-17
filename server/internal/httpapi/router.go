@@ -10,6 +10,8 @@ import (
 	"den/internal/room"
 
 	"github.com/cloudwego/hertz/pkg/app/server"
+	"github.com/cloudwego/hertz/pkg/common/config"
+	"github.com/cloudwego/hertz/pkg/network/standard"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 )
@@ -19,17 +21,31 @@ type Deps struct {
 	Redis     *redis.Client
 	Publisher realtime.Publisher
 	Roller    dice.Roller
+	Hub       *realtime.Hub
+	Addr      string
 }
 
 func New(deps Deps) *server.Hertz {
-	if deps.Publisher == nil {
+	opts := []config.Option{server.WithTransport(standard.NewTransporter)}
+	if deps.Addr != "" {
+		opts = append(opts, server.WithHostPorts(deps.Addr))
+	}
+	h := server.New(opts...)
+	h.NoHijackConnPool = true
+	Register(h, deps)
+	return h
+}
+
+func Register(h *server.Hertz, deps Deps) {
+	if deps.Hub != nil {
+		deps.Publisher = deps.Hub
+	} else if deps.Publisher == nil {
 		deps.Publisher = realtime.Nop{}
 	}
 	roller := deps.Roller
 	if roller == nil {
 		roller = dice.CryptoRoller
 	}
-	h := server.New()
 	h.Use(envelope.Recovery())
 	acc := &account.Handler{Pool: deps.Pool, Redis: deps.Redis}
 	h.POST("/den/v1/account/GuestLogin", acc.GuestLogin)
@@ -44,6 +60,9 @@ func New(deps Deps) *server.Hertz {
 	h.POST("/den/v1/room/Ready", Authenticate(deps.Redis, "room", "Ready"), rooms.Ready)
 	h.POST("/den/v1/room/DescribeRoom", Authenticate(deps.Redis, "room", "DescribeRoom"), rooms.DescribeRoom)
 	h.POST("/den/v1/room/StartGame", Authenticate(deps.Redis, "room", "StartGame"), rooms.StartGame)
+	if deps.Hub != nil {
+		h.GET("/den/v1/room/Subscribe", (&realtime.Handler{Hub: deps.Hub, Redis: deps.Redis, Pool: deps.Pool}).Subscribe)
+	}
 	diceHandler := &dice.Handler{
 		Service:   &dice.Service{Pool: deps.Pool, Roller: roller},
 		Publisher: deps.Publisher,
@@ -56,5 +75,4 @@ func New(deps Deps) *server.Hertz {
 	h.POST("/den/v1/match/StartMatch", Authenticate(deps.Redis, "match", "StartMatch"), matches.StartMatch)
 	h.POST("/den/v1/match/DescribeMatch", Authenticate(deps.Redis, "match", "DescribeMatch"), matches.DescribeMatch)
 	h.POST("/den/v1/match/CancelMatch", Authenticate(deps.Redis, "match", "CancelMatch"), matches.CancelMatch)
-	return h
 }
