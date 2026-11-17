@@ -65,9 +65,15 @@ export function bootApp(root: HTMLElement): void {
     try {
       return await fn();
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : "操作失败";
+      const msg =
+        err instanceof ApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : "操作失败";
       showToast(msg, "error");
       patch({ lastError: msg });
+      console.error("action failed", err);
       return undefined;
     } finally {
       setBusy(false);

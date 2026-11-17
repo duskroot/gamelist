@@ -14,10 +14,31 @@ export async function getLoginCode(): Promise<string> {
 
   let code = localStorage.getItem(STORAGE_CODE);
   if (!code) {
-    code = `h5_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+    // http://IP 非安全上下文没有 randomUUID，必须兜底，否则登录会直接抛错显示「操作失败」
+    code = `h5_${makeDevCode()}`;
     localStorage.setItem(STORAGE_CODE, code);
   }
   return code;
+}
+
+function makeDevCode(): string {
+  try {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      return crypto.randomUUID().replace(/-/g, "").slice(0, 16);
+    }
+  } catch {
+    /* insecure context */
+  }
+  try {
+    if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+      const bytes = new Uint8Array(8);
+      crypto.getRandomValues(bytes);
+      return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+    }
+  } catch {
+    /* ignore */
+  }
+  return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
 }
 
 export function loadToken(): string | null {
