@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"den/internal/account"
+	"den/internal/envelope"
 	"den/internal/realtime"
 
 	"github.com/cloudwego/hertz/pkg/app/server"
@@ -20,6 +21,7 @@ func New(deps Deps) *server.Hertz {
 		deps.Publisher = realtime.Nop{}
 	}
 	h := server.New()
+	h.Use(envelope.Recovery())
 	acc := &account.Handler{Pool: deps.Pool, Redis: deps.Redis}
 	h.POST("/den/v1/account/GuestLogin", acc.GuestLogin)
 	return h

@@ -86,5 +86,5 @@ func (h *Handler) GuestLogin(ctx context.Context, c *app.RequestContext) {
 func defaultNickname() string {
 	var n [2]byte
 	_, _ = rand.Read(n[:])
-	return fmt.Sprintf("玩家%04d", int(n[0])<<8|int(n[1])%10000)
+	return fmt.Sprintf("玩家%04d", (int(n[0])<<8|int(n[1]))%10000)
 }
